@@ -24,7 +24,7 @@ class DatabaseHelper {
     final dir = await getApplicationDocumentsDirectory();
     final path = join(dir.path, 'shopbook.db');
     return await openDatabase(path,
-        version: 2,
+        version: 4,
         onConfigure: (db) async => await db.execute('PRAGMA foreign_keys = ON'),
         onCreate: _onCreate,
         onUpgrade: _onUpgrade);
@@ -34,6 +34,7 @@ class DatabaseHelper {
     await db.execute('CREATE TABLE settings(key TEXT PRIMARY KEY, value TEXT)');
     await db.execute('''CREATE TABLE accounts(
       id TEXT PRIMARY KEY, name TEXT NOT NULL, type TEXT NOT NULL,
+      subtype TEXT DEFAULT 'normal',
       is_system INTEGER DEFAULT 0, active INTEGER DEFAULT 1)''');
     await db.execute('''CREATE TABLE items(
       id TEXT PRIMARY KEY, name TEXT NOT NULL, type TEXT NOT NULL,
@@ -68,9 +69,48 @@ class DatabaseHelper {
       id TEXT PRIMARY KEY, entry_id TEXT NOT NULL, item_name TEXT NOT NULL,
       price REAL NOT NULL, quantity INTEGER NOT NULL, total REAL NOT NULL,
       vendor TEXT)''');
+    await db.execute('''CREATE TABLE suppliers(
+      id TEXT PRIMARY KEY, name TEXT NOT NULL, phone TEXT,
+      current_balance REAL DEFAULT 0, active INTEGER DEFAULT 1)''');
   }
 
-  Future<void> _onUpgrade(Database db, int oldV, int newV) async {}
+  Future<void> _onUpgrade(Database db, int oldV, int newV) async {
+    if (oldV < 3) {
+      await db.execute(
+          "CREATE TABLE IF NOT EXISTS suppliers("
+          "id TEXT PRIMARY KEY, name TEXT NOT NULL, phone TEXT, "
+          "current_balance REAL DEFAULT 0, active INTEGER DEFAULT 1)");
+    }
+    if (oldV < 4) {
+      await db.execute(
+          "ALTER TABLE accounts ADD COLUMN subtype TEXT DEFAULT 'normal'");
+      await db.execute(
+          "UPDATE accounts SET subtype = 'cash' WHERE name = 'Cash in Hand'");
+      await db.execute(
+          "UPDATE accounts SET subtype = 'receivable' "
+          "WHERE name = 'Accounts Receivable'");
+      await db.execute(
+          "UPDATE accounts SET subtype = 'payable' "
+          "WHERE name = 'Accounts Payable' OR name LIKE 'AP - %'");
+      await db.execute(
+          "UPDATE accounts SET subtype = 'fixed' "
+          "WHERE type = 'asset' AND ("
+          "LOWER(name) LIKE '%furniture%' OR "
+          "LOWER(name) LIKE '%fixture%' OR "
+          "LOWER(name) LIKE '%chair%' OR "
+          "LOWER(name) LIKE '%equipment%' OR "
+          "LOWER(name) LIKE '%vehicle%' OR "
+          "LOWER(name) LIKE '%machine%' OR "
+          "LOWER(name) LIKE '%computer%' OR "
+          "LOWER(name) LIKE '%instrument%')");
+      await db.execute(
+          "UPDATE accounts SET subtype = 'bank' "
+          "WHERE type = 'asset' "
+          "AND (subtype IS NULL OR subtype = 'normal') "
+          "AND name != 'Cash in Hand' "
+          "AND name != 'Accounts Receivable'");
+    }
+  }
 
   // ---------- Settings ----------
   Future<String?> getSetting(String key) async {
@@ -293,6 +333,52 @@ class DatabaseHelper {
     final db = await database;
     final r = await db.query('invoices', where: 'id = ?', whereArgs: [id]);
     return r.isEmpty ? null : r.first;
+  }
+
+  // ---------- Subtype helpers ----------
+  Future<List<Map<String, dynamic>>> getPaymentAccounts() async {
+    final db = await database;
+    return await db.query('accounts',
+        where: "type = 'asset' AND subtype IN ('cash', 'bank', 'wallet') AND active = 1",
+        orderBy: 'name');
+  }
+
+  Future<List<Map<String, dynamic>>> getFixedAssets() async {
+    final db = await database;
+    return await db.query('accounts',
+        where: "type = 'asset' AND subtype = 'fixed' AND active = 1",
+        orderBy: 'name');
+  }
+
+  // ---------- Suppliers ----------
+  Future<List<Map<String, dynamic>>> getActiveSuppliers() async {
+    final db = await database;
+    return await db.query('suppliers', where: 'active = 1',
+        orderBy: 'name COLLATE NOCASE');
+  }
+
+  Future<void> insertSupplier(Map<String, dynamic> row) async {
+    final db = await database;
+    await db.insert('suppliers', row,
+        conflictAlgorithm: ConflictAlgorithm.replace);
+  }
+
+  Future<void> updateSupplier(String id, Map<String, dynamic> row) async {
+    final db = await database;
+    await db.update('suppliers', row, where: 'id = ?', whereArgs: [id]);
+  }
+
+  Future<void> deleteSupplier(String id) async {
+    final db = await database;
+    await db.update('suppliers', {'active': 0},
+        where: 'id = ?', whereArgs: [id]);
+  }
+
+  Future<void> adjustSupplierBalance(String id, double delta) async {
+    final db = await database;
+    await db.rawUpdate(
+        'UPDATE suppliers SET current_balance = current_balance + ? WHERE id = ?',
+        [delta, id]);
   }
 
   // ---------- Balances & Totals ----------

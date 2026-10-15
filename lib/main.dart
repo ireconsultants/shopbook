@@ -3,6 +3,12 @@ import 'package:intl/intl.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:uuid/uuid.dart';
 import 'database_helper.dart';
+import 'reports_page.dart';
+import 'balance_check.dart';
+import 'fixed_assets_page.dart';
+import 'supplies_form.dart';
+import 'accounts_page.dart';
+import 'spend_form.dart';
 
 void main() => runApp(const ShopBookApp());
 
@@ -24,17 +30,19 @@ const _seedItems = <List<String>>[
 ];
 
 const _seedAccounts = <List<String>>[
-  ['Cash in Hand', 'asset'],
-  ['Accounts Receivable', 'asset'],
-  ['Service Income', 'income'],
-  ['Supplies Purchased', 'expense'],
-  ['Rent', 'expense'],
-  ['Utilities', 'expense'],
-  ['Salary', 'expense'],
-  ['Tea & Refreshments', 'expense'],
-  ['Misc Expense', 'expense'],
-  ['Owner Capital', 'equity'],
-  ['Owner Drawings', 'equity'],
+  ['Cash in Hand', 'asset', 'cash'],
+  ['Accounts Receivable', 'asset', 'receivable'],
+  ['Service Income', 'income', 'normal'],
+  ['Supplies Purchased', 'expense', 'normal'],
+  ['Rent', 'expense', 'normal'],
+  ['Utilities', 'expense', 'normal'],
+  ['Salary', 'expense', 'normal'],
+  ['Tea & Refreshments', 'expense', 'normal'],
+  ['Misc Expense', 'expense', 'normal'],
+  ['Accrued Expenses', 'liability', 'accrued'],
+  ['Owner Capital', 'equity', 'normal'],
+  ['Owner Drawings', 'equity', 'normal'],
+  ['Accounts Payable', 'liability', 'payable'],
 ];
 
 // ============================================================
@@ -122,6 +130,7 @@ class _SetupScreenState extends State<SetupScreen> {
           'id': _uuid.v4(),
           'name': a[0],
           'type': a[1],
+          'subtype': a.length > 2 ? a[2] : 'normal',
           'is_system': 1,
           'active': 1,
         });
@@ -327,9 +336,10 @@ class _MainShellState extends State<MainShell> {
     final screens = [
       SaleScreen(key: ValueKey('sale-$_refreshTick'), onChanged: _bump),
       CustomersScreen(key: ValueKey('cust-$_refreshTick'), onChanged: _bump),
-      ExpenseScreen(onChanged: _bump),
+      SuppliesScreen(key: ValueKey('sup-$_refreshTick'), onChanged: _bump),
+      ExpenseScreen(key: ValueKey('exp-$_refreshTick'), onChanged: _bump),
       ItemsScreen(onChanged: _bump),
-      ReportsScreen(key: ValueKey('rep-$_refreshTick')),
+      FullReportsScreen(),
     ];
 
     return Scaffold(
@@ -384,6 +394,8 @@ class _MainShellState extends State<MainShell> {
           NavigationDestination(
               icon: Icon(Icons.people), label: 'Customers'),
           NavigationDestination(
+              icon: Icon(Icons.shopping_bag), label: 'Supplies'),
+          NavigationDestination(
               icon: Icon(Icons.receipt_long), label: 'Expense'),
           NavigationDestination(
               icon: Icon(Icons.list_alt), label: 'Items'),
@@ -435,7 +447,9 @@ class _SaleScreenState extends State<SaleScreen> {
     final all = await _db.getAllAccounts();
     final payAccs = all
         .where((a) =>
-            a['type'] == 'asset' && a['name'] != 'Accounts Receivable')
+            a['type'] == 'asset' &&
+            (a['subtype'] == 'cash' || a['subtype'] == 'bank' ||
+             a['subtype'] == 'wallet'))
         .toList();
     if (!mounted) return;
     setState(() {
@@ -1647,57 +1661,12 @@ class _CustomerLedgerPageState extends State<CustomerLedgerPage> {
 // EXPENSE + SUPPLIES
 // ============================================================
 
-class ExpenseScreen extends StatefulWidget {
+class ExpenseScreen extends StatelessWidget {
   final VoidCallback onChanged;
   const ExpenseScreen({super.key, required this.onChanged});
   @override
-  State<ExpenseScreen> createState() => _ExpenseScreenState();
-}
-
-class _ExpenseScreenState extends State<ExpenseScreen>
-    with SingleTickerProviderStateMixin {
-  late TabController _tab;
-
-  @override
-  void initState() {
-    super.initState();
-    _tab = TabController(length: 2, vsync: this);
-  }
-
-  @override
-  void dispose() {
-    _tab.dispose();
-    super.dispose();
-  }
-
-  @override
   Widget build(BuildContext context) {
-    return Column(
-      children: [
-        Material(
-          color: Colors.teal,
-          child: TabBar(
-            controller: _tab,
-            indicatorColor: Colors.white,
-            labelColor: Colors.white,
-            unselectedLabelColor: Colors.white70,
-            tabs: const [
-              Tab(text: 'Expense'),
-              Tab(text: 'Supplies'),
-            ],
-          ),
-        ),
-        Expanded(
-          child: TabBarView(
-            controller: _tab,
-            children: [
-              _ExpenseForm(onChanged: widget.onChanged),
-              _SuppliesForm(onChanged: widget.onChanged),
-            ],
-          ),
-        ),
-      ],
-    );
+    return SpendFormPage(onChanged: onChanged);
   }
 }
 
@@ -1862,6 +1831,15 @@ class _ExpenseFormState extends State<_ExpenseForm> {
         ),
       ),
     );
+  }
+}
+
+class SuppliesScreen extends StatelessWidget {
+  final VoidCallback onChanged;
+  const SuppliesScreen({super.key, required this.onChanged});
+  @override
+  Widget build(BuildContext context) {
+    return SuppliesFormPage(onChanged: onChanged);
   }
 }
 
@@ -2343,7 +2321,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
     final pay = all
         .where((a) =>
             a['type'] == 'asset' &&
-            a['name'] != 'Accounts Receivable')
+            (a['subtype'] == 'cash' || a['subtype'] == 'bank' ||
+             a['subtype'] == 'wallet'))
         .toList();
     if (!mounted) return;
     setState(() {
@@ -2482,6 +2461,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
       'id': _uuid.v4(),
       'name': name,
       'type': 'asset',
+      'subtype': 'bank',
       'is_system': 0,
       'active': 1,
     });
@@ -2596,6 +2576,62 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   ),
                 )),
           const SizedBox(height: 24),
+          Row(
+            children: [
+              const Text('Accounts & Suppliers',
+                  style: TextStyle(
+                      fontSize: 16, fontWeight: FontWeight.bold)),
+            ],
+          ),
+          ListTile(
+            contentPadding: EdgeInsets.zero,
+            leading: const Icon(Icons.local_shipping, color: Colors.teal),
+            title: const Text('Suppliers'),
+            subtitle: const Text('Vendors you buy from on credit'),
+            trailing: const Icon(Icons.arrow_forward_ios, size: 14),
+            onTap: () async {
+              await Navigator.push(context,
+                  MaterialPageRoute(builder: (_) => const SuppliersPage()));
+              if (context.mounted) Navigator.pop(context, true);
+            },
+          ),
+          ListTile(
+            contentPadding: EdgeInsets.zero,
+            leading: const Icon(Icons.account_balance_wallet, color: Colors.teal),
+            title: const Text('Manage Ledgers'),
+            subtitle: const Text('Create new ledger accounts'),
+            trailing: const Icon(Icons.arrow_forward_ios, size: 14),
+            onTap: () async {
+              await Navigator.push(context,
+                  MaterialPageRoute(builder: (_) => const ManageLedgersPage()));
+              if (context.mounted) Navigator.pop(context, true);
+            },
+          ),
+          ListTile(
+            contentPadding: EdgeInsets.zero,
+            leading: const Icon(Icons.chair, color: Colors.teal),
+            title: const Text('Fixed Assets'),
+            subtitle: const Text('Furniture, equipment, chairs, AC, etc.'),
+            trailing: const Icon(Icons.arrow_forward_ios, size: 14),
+            onTap: () async {
+              await Navigator.push(context,
+                  MaterialPageRoute(builder: (_) => const FixedAssetsPage()));
+              if (context.mounted) Navigator.pop(context, true);
+            },
+          ),
+          ListTile(
+            contentPadding: EdgeInsets.zero,
+            leading: const Icon(Icons.check_circle_outline, color: Colors.teal),
+            title: const Text('Balance Check'),
+            subtitle: const Text('Verify debits = credits in all entries'),
+            trailing: const Icon(Icons.arrow_forward_ios, size: 14),
+            onTap: () async {
+              await Navigator.push(context,
+                  MaterialPageRoute(builder: (_) => const BalanceCheckPage()));
+              if (context.mounted) Navigator.pop(context, true);
+            },
+          ),
+          const SizedBox(height: 20),
           Row(
             children: [
               const Text('Payment Accounts',
