@@ -430,6 +430,7 @@ class _SaleScreenState extends State<SaleScreen> {
   DateTime _saleDate = DateTime.now();
   Map<String, dynamic>? _customer;
   String? _currentBarberId;
+  String? _receivedById;
   String? _paymentAccountId;
   final _paidCtrl = TextEditingController();
   bool _paymentSplit = false;
@@ -458,6 +459,8 @@ class _SaleScreenState extends State<SaleScreen> {
       _employees = emps;
       _paymentAccounts = payAccs;
       _currentBarberId =
+          emps.isNotEmpty ? emps.first['id'] as String : null;
+      _receivedById =
           emps.isNotEmpty ? emps.first['id'] as String : null;
       _paymentAccountId =
           payAccs.isNotEmpty ? payAccs.first['id'] as String : null;
@@ -681,8 +684,12 @@ class _SaleScreenState extends State<SaleScreen> {
       'paid_amount': paid,
       'balance_due': unpaid - advance,
       'payment_mode': paymentAcc['name'],
-      'received_by_id': null,
-      'received_by_name': null,
+      'received_by_id': _receivedById,
+      'received_by_name': _receivedById == null
+          ? null
+          : _employees
+              .firstWhere((e) => e['id'] == _receivedById,
+                  orElse: () => <String, dynamic>{})['name'],
       'journal_entry_id': null,
       'narration': serviceLine,
     });
@@ -862,6 +869,33 @@ class _SaleScreenState extends State<SaleScreen> {
                           ))
                       .toList(),
                   onChanged: (v) => setState(() => _currentBarberId = v),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 6),
+          Row(
+            children: [
+              const Icon(Icons.payments, size: 16, color: Colors.teal),
+              const SizedBox(width: 6),
+              const Text('Received by:',
+                  style: TextStyle(
+                      fontSize: 13, fontWeight: FontWeight.w500)),
+              const SizedBox(width: 6),
+              Expanded(
+                child: DropdownButton<String>(
+                  value: _receivedById,
+                  isDense: true,
+                  isExpanded: true,
+                  underline: const SizedBox(),
+                  items: _employees
+                      .map((e) => DropdownMenuItem(
+                            value: e['id'] as String,
+                            child: Text(e['name'] as String,
+                                style: const TextStyle(fontSize: 13)),
+                          ))
+                      .toList(),
+                  onChanged: (v) => setState(() => _receivedById = v),
                 ),
               ),
             ],

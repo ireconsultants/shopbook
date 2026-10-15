@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'database_helper.dart';
+import 'barber_report.dart';
 
 final _money = NumberFormat('#,##0.00');
 final _dateFmt = DateFormat('dd-MM-yy');
@@ -48,6 +49,9 @@ class FullReportsScreen extends StatelessWidget {
           _menuTile(context, 'Day Book',
               'All journal entries by date',
               Icons.event_note, const DayBookPage()),
+          _menuTile(context, 'Barber Productivity',
+              'Services and revenue by barber',
+              Icons.people_alt, const BarberReportPage()),
         ],
       ),
     );
