@@ -267,15 +267,56 @@ class _ProfitLossPageState extends State<ProfitLossPage> {
   bool _loading = true;
   DateTime _from = DateTime(DateTime.now().year, DateTime.now().month, 1);
   DateTime _to = DateTime.now();
-  List<Map<String, dynamic>> _income = [];
-  List<Map<String, dynamic>> _expense = [];
-  double _incomeTotal = 0;
-  double _expenseTotal = 0;
+
+  List<Map<String, dynamic>> _revenueItems = [];
+  List<Map<String, dynamic>> _otherIncomeItems = [];
+  List<Map<String, dynamic>> _adminItems = [];
+  List<Map<String, dynamic>> _sellingItems = [];
+  List<Map<String, dynamic>> _financeItems = [];
+
+  double _revenueTotal = 0;
+  double _otherIncomeTotal = 0;
+  double _adminTotal = 0;
+  double _sellingTotal = 0;
+  double _financeTotal = 0;
 
   @override
   void initState() {
     super.initState();
     _load();
+  }
+
+  String _categorizeIncome(String name) {
+    final n = name.toLowerCase();
+    if (n.contains('discount received') ||
+        n.contains('gain on disposal') ||
+        n.contains('interest received') ||
+        n.contains('other income') ||
+        n.contains('commission received')) {
+      return 'other';
+    }
+    return 'revenue';
+  }
+
+  String _categorizeExpense(String name) {
+    final n = name.toLowerCase();
+    if (n.contains('bank charge') ||
+        n.contains('interest') ||
+        n.contains('finance cost') ||
+        n.contains('mark-up') ||
+        n.contains('markup')) {
+      return 'finance';
+    }
+    if (n.contains('marketing') ||
+        n.contains('advertising') ||
+        n.contains('commission paid') ||
+        n.contains('discount allowed') ||
+        n.contains('delivery') ||
+        n.contains('transport') ||
+        n.contains('promotion')) {
+      return 'selling';
+    }
+    return 'admin';
   }
 
   Future<void> _load() async {
@@ -285,38 +326,61 @@ class _ProfitLossPageState extends State<ProfitLossPage> {
     final start = DateTime(_from.year, _from.month, _from.day).toIso8601String();
     final end = DateTime(_to.year, _to.month, _to.day, 23, 59, 59).toIso8601String();
 
-    final inc = await d.rawQuery('''
-      SELECT a.name AS account_name,
-             COALESCE(SUM(jl.credit - jl.debit), 0) AS amount
-      FROM accounts a
-      LEFT JOIN journal_lines jl ON jl.account_id = a.id
-      LEFT JOIN journal_entries je ON je.id = jl.entry_id
-      WHERE a.type = 'income' AND a.active = 1
-        AND (je.date IS NULL OR (je.date >= ? AND je.date <= ?))
-      GROUP BY a.id HAVING amount != 0 ORDER BY a.name
-    ''', [start, end]);
+    final inc = await d.rawQuery(
+      "SELECT a.name AS n, COALESCE(SUM(jl.credit - jl.debit), 0) AS amount "
+      "FROM accounts a "
+      "LEFT JOIN journal_lines jl ON jl.account_id = a.id "
+      "LEFT JOIN journal_entries je ON je.id = jl.entry_id "
+      "WHERE a.type = 'income' AND a.active = 1 "
+      "AND (je.date IS NULL OR (je.date >= ? AND je.date <= ?)) "
+      "GROUP BY a.id HAVING amount != 0 ORDER BY a.name",
+      [start, end]);
 
-    final exp = await d.rawQuery('''
-      SELECT a.name AS account_name,
-             COALESCE(SUM(jl.debit - jl.credit), 0) AS amount
-      FROM accounts a
-      LEFT JOIN journal_lines jl ON jl.account_id = a.id
-      LEFT JOIN journal_entries je ON je.id = jl.entry_id
-      WHERE a.type = 'expense' AND a.active = 1
-        AND (je.date IS NULL OR (je.date >= ? AND je.date <= ?))
-      GROUP BY a.id HAVING amount != 0 ORDER BY a.name
-    ''', [start, end]);
+    final exp = await d.rawQuery(
+      "SELECT a.name AS n, COALESCE(SUM(jl.debit - jl.credit), 0) AS amount "
+      "FROM accounts a "
+      "LEFT JOIN journal_lines jl ON jl.account_id = a.id "
+      "LEFT JOIN journal_entries je ON je.id = jl.entry_id "
+      "WHERE a.type = 'expense' AND a.active = 1 "
+      "AND (je.date IS NULL OR (je.date >= ? AND je.date <= ?)) "
+      "GROUP BY a.id HAVING amount != 0 ORDER BY a.name",
+      [start, end]);
 
-    double it = 0, et = 0;
-    for (var r in inc) { it += (r['amount'] as num).toDouble(); }
-    for (var r in exp) { et += (r['amount'] as num).toDouble(); }
+    final rev = <Map<String, dynamic>>[];
+    final oth = <Map<String, dynamic>>[];
+    for (var r in inc) {
+      if (_categorizeIncome(r['n'] as String) == 'other') {
+        oth.add(r);
+      } else {
+        rev.add(r);
+      }
+    }
+
+    final adm = <Map<String, dynamic>>[];
+    final sel = <Map<String, dynamic>>[];
+    final fin = <Map<String, dynamic>>[];
+    for (var r in exp) {
+      final cat = _categorizeExpense(r['n'] as String);
+      if (cat == 'admin') adm.add(r);
+      if (cat == 'selling') sel.add(r);
+      if (cat == 'finance') fin.add(r);
+    }
+
+    double sum(List<Map<String, dynamic>> l) =>
+        l.fold(0.0, (s, r) => s + (r['amount'] as num).toDouble());
 
     if (!mounted) return;
     setState(() {
-      _income = inc;
-      _expense = exp;
-      _incomeTotal = it;
-      _expenseTotal = et;
+      _revenueItems = rev;
+      _otherIncomeItems = oth;
+      _adminItems = adm;
+      _sellingItems = sel;
+      _financeItems = fin;
+      _revenueTotal = sum(rev);
+      _otherIncomeTotal = sum(oth);
+      _adminTotal = sum(adm);
+      _sellingTotal = sum(sel);
+      _financeTotal = sum(fin);
       _loading = false;
     });
   }
@@ -335,112 +399,149 @@ class _ProfitLossPageState extends State<ProfitLossPage> {
 
   @override
   Widget build(BuildContext context) {
-    final profit = _incomeTotal - _expenseTotal;
+    final totalIncome = _revenueTotal + _otherIncomeTotal;
+    final totalExpense = _adminTotal + _sellingTotal + _financeTotal;
+    final netProfit = totalIncome - totalExpense;
+
     return Scaffold(
       appBar: AppBar(title: const Text('Profit & Loss')),
       body: _loading
           ? const Center(child: CircularProgressIndicator())
-          : Column(
-              children: [
-                Container(
-                  padding: const EdgeInsets.all(12),
-                  color: Colors.teal.shade50,
-                  child: Row(children: [
-                    Expanded(child: OutlinedButton.icon(
-                      onPressed: _pickFrom,
-                      icon: const Icon(Icons.calendar_today, size: 16),
-                      label: Text('From: ${_dateFmt.format(_from)}',
-                          style: const TextStyle(fontSize: 12)),
-                    )),
-                    const SizedBox(width: 8),
-                    Expanded(child: OutlinedButton.icon(
-                      onPressed: _pickTo,
-                      icon: const Icon(Icons.calendar_today, size: 16),
-                      label: Text('To: ${_dateFmt.format(_to)}',
-                          style: const TextStyle(fontSize: 12)),
-                    )),
-                  ]),
-                ),
-                Expanded(
-                  child: ListView(
-                    padding: const EdgeInsets.all(12),
-                    children: [
-                      const _SectionHeader('Income'),
-                      if (_income.isEmpty)
-                        const Padding(padding: EdgeInsets.all(8),
-                            child: Text('No income in this period.',
-                                style: TextStyle(color: Colors.grey)))
-                      else
-                        ..._income.map((r) => _lineItem(
-                            r['account_name'] as String,
-                            (r['amount'] as num).toDouble())),
-                      _subtotal('Total Income', _incomeTotal),
-                      const SizedBox(height: 16),
-                      const _SectionHeader('Expenses'),
-                      if (_expense.isEmpty)
-                        const Padding(padding: EdgeInsets.all(8),
-                            child: Text('No expenses in this period.',
-                                style: TextStyle(color: Colors.grey)))
-                      else
-                        ..._expense.map((r) => _lineItem(
-                            r['account_name'] as String,
-                            (r['amount'] as num).toDouble())),
-                      _subtotal('Total Expenses', _expenseTotal),
-                      const SizedBox(height: 20),
-                      _netProfit(profit),
-                    ],
-                  ),
-                ),
-              ],
-            ),
+          : Column(children: [
+              Container(
+                padding: const EdgeInsets.all(12),
+                color: Colors.teal.shade50,
+                child: Row(children: [
+                  Expanded(child: OutlinedButton.icon(
+                    onPressed: _pickFrom,
+                    icon: const Icon(Icons.calendar_today, size: 16),
+                    label: Text('From: ${_dateFmt.format(_from)}',
+                        style: const TextStyle(fontSize: 12)),
+                  )),
+                  const SizedBox(width: 8),
+                  Expanded(child: OutlinedButton.icon(
+                    onPressed: _pickTo,
+                    icon: const Icon(Icons.calendar_today, size: 16),
+                    label: Text('To: ${_dateFmt.format(_to)}',
+                        style: const TextStyle(fontSize: 12)),
+                  )),
+                ]),
+              ),
+              Expanded(child: ListView(
+                padding: const EdgeInsets.all(12),
+                children: [
+                  const _SectionHeader('REVENUE'),
+                  if (_revenueItems.isEmpty)
+                    const Padding(padding: EdgeInsets.all(8),
+                        child: Text('None',
+                            style: TextStyle(color: Colors.grey)))
+                  else
+                    ..._renderItems(_revenueItems),
+                  _subtotal('Total Revenue', _revenueTotal),
+                  const SizedBox(height: 16),
+                  const _SectionHeader('OTHER INCOME'),
+                  if (_otherIncomeItems.isEmpty)
+                    const Padding(padding: EdgeInsets.all(8),
+                        child: Text('None',
+                            style: TextStyle(color: Colors.grey)))
+                  else
+                    ..._renderItems(_otherIncomeItems),
+                  _subtotal('Total Other Income', _otherIncomeTotal),
+                  const SizedBox(height: 16),
+                  _subtotal('TOTAL INCOME', totalIncome, big: true),
+                  const SizedBox(height: 24),
+                  const _SectionHeader('ADMINISTRATIVE EXPENSES'),
+                  if (_adminItems.isEmpty)
+                    const Padding(padding: EdgeInsets.all(8),
+                        child: Text('None',
+                            style: TextStyle(color: Colors.grey)))
+                  else
+                    ..._renderItems(_adminItems),
+                  _subtotal('Total Administrative', _adminTotal),
+                  const SizedBox(height: 16),
+                  const _SectionHeader('SELLING & DISTRIBUTION'),
+                  if (_sellingItems.isEmpty)
+                    const Padding(padding: EdgeInsets.all(8),
+                        child: Text('None',
+                            style: TextStyle(color: Colors.grey)))
+                  else
+                    ..._renderItems(_sellingItems),
+                  _subtotal('Total Selling & Distribution', _sellingTotal),
+                  const SizedBox(height: 16),
+                  const _SectionHeader('FINANCE COST'),
+                  if (_financeItems.isEmpty)
+                    const Padding(padding: EdgeInsets.all(8),
+                        child: Text('None',
+                            style: TextStyle(color: Colors.grey)))
+                  else
+                    ..._renderItems(_financeItems),
+                  _subtotal('Total Finance Cost', _financeTotal),
+                  const SizedBox(height: 16),
+                  _subtotal('TOTAL EXPENSES', totalExpense, big: true),
+                  const SizedBox(height: 24),
+                  _netProfitCard(netProfit),
+                ],
+              )),
+            ]),
     );
   }
 
-  Widget _lineItem(String name, double amount) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 4),
-      child: Row(children: [
-        Expanded(child: Text(name, style: const TextStyle(fontSize: 14))),
-        Text(_plain(amount),
-            style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w500)),
-      ]),
-    );
+  List<Widget> _renderItems(List<Map<String, dynamic>> items) {
+    return items.map((it) {
+      return Padding(
+        padding: const EdgeInsets.only(left: 8, top: 4, bottom: 4, right: 4),
+        child: Row(children: [
+          Expanded(child: Text(it['n'] as String,
+              style: const TextStyle(fontSize: 13))),
+          Text(_plain((it['amount'] as num).toDouble()),
+              style: const TextStyle(fontSize: 13)),
+        ]),
+      );
+    }).toList();
   }
 
-  Widget _subtotal(String label, double amount) {
+  Widget _subtotal(String label, double amount, {bool big = false}) {
     return Container(
       margin: const EdgeInsets.only(top: 6),
       padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 4),
-      decoration: const BoxDecoration(
-        border: Border(top: BorderSide(color: Colors.grey)),
+      decoration: BoxDecoration(
+        border: Border(
+          top: BorderSide(
+              color: big ? Colors.teal.shade800 : Colors.grey,
+              width: big ? 2 : 1),
+        ),
       ),
       child: Row(children: [
         Expanded(child: Text(label,
-            style: const TextStyle(fontSize: 14, fontWeight: FontWeight.bold))),
+            style: TextStyle(fontSize: big ? 14 : 13,
+                fontWeight: FontWeight.bold,
+                color: big ? Colors.teal.shade900 : Colors.black))),
         Text(_plain(amount),
-            style: const TextStyle(fontSize: 14, fontWeight: FontWeight.bold)),
+            style: TextStyle(fontSize: big ? 15 : 13,
+                fontWeight: FontWeight.bold,
+                color: big ? Colors.teal.shade900 : Colors.black)),
       ]),
     );
   }
 
-  Widget _netProfit(double profit) {
-    final isProfit = profit >= 0;
+  Widget _netProfitCard(double netProfit) {
+    final isProfit = netProfit >= 0;
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
         color: isProfit ? Colors.green.shade50 : Colors.red.shade50,
-        borderRadius: BorderRadius.circular(8),
         border: Border.all(
             color: isProfit ? Colors.green.shade700 : Colors.red.shade700,
             width: 2),
+        borderRadius: BorderRadius.circular(8),
       ),
       child: Row(children: [
         Expanded(child: Text(
-          isProfit ? 'Net Profit' : 'Net Loss',
-          style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold,
+          isProfit ? 'Net Profit for the period' : 'Net Loss for the period',
+          style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold,
               color: isProfit ? Colors.green.shade900 : Colors.red.shade900),
         )),
-        Text(_plain(profit.abs()),
+        Text(_plain(netProfit.abs()),
             style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold,
                 color: isProfit ? Colors.green.shade900 : Colors.red.shade900)),
       ]),
