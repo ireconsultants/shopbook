@@ -2341,6 +2341,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   List<Map<String, dynamic>> _employees = [];
   List<Map<String, dynamic>> _payAccounts = [];
   bool _loading = true;
+  bool _advancedMode = false;
 
   @override
   void initState() {
@@ -2350,6 +2351,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
   Future<void> _load() async {
     final name = await _db.getSetting('shop_name') ?? '';
+    final advStr = await _db.getSetting('advanced_mode');
+    final adv = advStr == '1';
     final emps = await _db.getActiveEmployees();
     final all = await _db.getAllAccounts();
     final pay = all
@@ -2363,8 +2366,15 @@ class _SettingsScreenState extends State<SettingsScreen> {
       _shopCtrl.text = name;
       _employees = emps;
       _payAccounts = pay;
+      _advancedMode = adv;
       _loading = false;
     });
+  }
+
+  Future<void> _toggleAdvancedMode(bool v) async {
+    await _db.setSetting('advanced_mode', v ? '1' : '0');
+    if (!mounted) return;
+    setState(() => _advancedMode = v);
   }
 
   Future<void> _saveShopName() async {
@@ -2610,6 +2620,17 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   ),
                 )),
           const SizedBox(height: 24),
+          SwitchListTile(
+            contentPadding: EdgeInsets.zero,
+            title: const Text('Advanced Mode',
+                style: TextStyle(fontWeight: FontWeight.bold)),
+            subtitle: const Text(
+                'Show fixed assets, loans, capital and other accounting options'),
+            value: _advancedMode,
+            onChanged: _toggleAdvancedMode,
+          ),
+          const Divider(),
+          const SizedBox(height: 8),
           Row(
             children: [
               const Text('Accounts & Suppliers',

@@ -45,6 +45,7 @@ class _SpendFormPageState extends State<SpendFormPage> {
   List<Map<String, dynamic>> _equityAccs = [];
 
   bool _loading = true;
+  bool _advancedMode = false;
 
   @override
   void initState() {
@@ -54,6 +55,8 @@ class _SpendFormPageState extends State<SpendFormPage> {
 
   Future<void> _load() async {
     final db = DatabaseHelper();
+    final advStr = await db.getSetting('advanced_mode');
+    final adv = advStr == '1';
     final all = await db.getAllAccounts();
     final sup = await db.getActiveSuppliers();
 
@@ -107,6 +110,7 @@ class _SpendFormPageState extends State<SpendFormPage> {
       if (exp.isNotEmpty) _expenseAccId = exp.first['id'] as String;
       if (cash.isNotEmpty) _paymentAccId = cash.first['id'] as String;
       if (sup.isNotEmpty) _supplierId = sup.first['id'] as String;
+      _advancedMode = adv;
       _loading = false;
     });
   }
@@ -298,11 +302,12 @@ class _SpendFormPageState extends State<SpendFormPage> {
               decoration: const InputDecoration(
                   labelText: 'What is this?',
                   border: OutlineInputBorder()),
-              items: const [
-                DropdownMenuItem(value: 'expense',
+              items: [
+                const DropdownMenuItem(value: 'expense',
                     child: Text('Expense (bills, rent, salary, etc.)')),
-                DropdownMenuItem(value: 'asset',
-                    child: Text('Fixed Asset (furniture, machine, etc.)')),
+                if (_advancedMode)
+                  const DropdownMenuItem(value: 'asset',
+                      child: Text('Fixed Asset (furniture, machine, etc.)')),
               ],
               onChanged: (v) => setState(() => _kind = v!),
             ),
@@ -399,15 +404,17 @@ class _SpendFormPageState extends State<SpendFormPage> {
                 const DropdownMenuItem(
                     value: 'supplier',
                     child: Text('On credit from Supplier')),
-                const DropdownMenuItem(
-                    value: 'loan_short',
-                    child: Text('Loan - Current (under 1 year)')),
-                const DropdownMenuItem(
-                    value: 'loan_long',
-                    child: Text('Loan - Non-Current (1+ years)')),
-                const DropdownMenuItem(
-                    value: 'capital',
-                    child: Text("From Owner's Capital")),
+                if (_advancedMode) ...[
+                  const DropdownMenuItem(
+                      value: 'loan_short',
+                      child: Text('Loan - Current (under 1 year)')),
+                  const DropdownMenuItem(
+                      value: 'loan_long',
+                      child: Text('Loan - Non-Current (1+ years)')),
+                  const DropdownMenuItem(
+                      value: 'capital',
+                      child: Text("From Owner's Capital")),
+                ],
               ],
               onChanged: (v) => setState(() {
                 _paymentMode = v ?? 'cash';
