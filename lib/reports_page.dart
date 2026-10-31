@@ -186,10 +186,10 @@ class _TrialBalancePageState extends State<TrialBalancePage> {
         SizedBox(width: 100, child: Padding(
           padding: EdgeInsets.symmetric(horizontal: 8),
           child: Text('Type', style: style))),
-        SizedBox(width: 100, child: Padding(
+        SizedBox(width: 140, child: Padding(
           padding: EdgeInsets.symmetric(horizontal: 8),
           child: Text('Debit', style: style, textAlign: TextAlign.right))),
-        SizedBox(width: 100, child: Padding(
+        SizedBox(width: 140, child: Padding(
           padding: EdgeInsets.symmetric(horizontal: 8),
           child: Text('Credit', style: style, textAlign: TextAlign.right))),
       ]),
@@ -210,15 +210,19 @@ class _TrialBalancePageState extends State<TrialBalancePage> {
           padding: const EdgeInsets.symmetric(horizontal: 8),
           child: Text(_typeLabel(r.type),
               style: const TextStyle(fontSize: 12, color: Colors.grey)))),
-        SizedBox(width: 100, child: Padding(
+        SizedBox(width: 140, child: Padding(
           padding: const EdgeInsets.symmetric(horizontal: 8),
           child: Text(r.debit == 0 ? '' : _plain(r.debit),
               textAlign: TextAlign.right,
+              maxLines: 1,
+              softWrap: false,
               style: const TextStyle(fontSize: 13)))),
-        SizedBox(width: 100, child: Padding(
+        SizedBox(width: 140, child: Padding(
           padding: const EdgeInsets.symmetric(horizontal: 8),
           child: Text(r.credit == 0 ? '' : _plain(r.credit),
               textAlign: TextAlign.right,
+              maxLines: 1,
+              softWrap: false,
               style: const TextStyle(fontSize: 13)))),
       ]),
     );
@@ -244,14 +248,14 @@ class _TrialBalancePageState extends State<TrialBalancePage> {
           child: Text(balanced ? 'Balanced' : 'Out of balance',
               style: TextStyle(fontSize: 11,
                   color: balanced ? Colors.green.shade800 : Colors.red)))),
-        SizedBox(width: 100, child: Padding(
+        SizedBox(width: 140, child: Padding(
           padding: const EdgeInsets.symmetric(horizontal: 8),
           child: Text(_plain(_totalDebit),
-              textAlign: TextAlign.right, style: bold))),
-        SizedBox(width: 100, child: Padding(
+              textAlign: TextAlign.right, maxLines: 1, softWrap: false, style: bold))),
+        SizedBox(width: 140, child: Padding(
           padding: const EdgeInsets.symmetric(horizontal: 8),
           child: Text(_plain(_totalCredit),
-              textAlign: TextAlign.right, style: bold))),
+              textAlign: TextAlign.right, maxLines: 1, softWrap: false, style: bold))),
       ]),
     );
   }
@@ -1198,6 +1202,26 @@ class _DayBookPageState extends State<DayBookPage> {
                           style: const TextStyle(fontSize: 13)),
                       subtitle: Text((e['source'] as String?) ?? '',
                           style: const TextStyle(fontSize: 11)),
+                      trailing: IconButton(
+                        icon: const Icon(Icons.delete, color: Colors.red, size: 20),
+                        onPressed: () async {
+                          final confirm = await showDialog<bool>(
+                            context: context,
+                            builder: (ctx) => AlertDialog(
+                              title: const Text('Delete Entry?'),
+                              content: const Text('This will reverse the accounting effect and update balances.'),
+                              actions: [
+                                TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
+                                ElevatedButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Delete')),
+                              ],
+                            ),
+                          );
+                          if (confirm == true) {
+                            await DatabaseHelper().deleteJournalEntryWithReverse(e['id'] as String);
+                            _load();
+                          }
+                        },
+                      ),
                     );
                   },
                 ),

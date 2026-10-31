@@ -272,7 +272,7 @@ class _ManageLedgersPageState extends State<ManageLedgersPage> {
   Future<void> _add() async {
     final nameCtrl = TextEditingController();
     String type = 'expense';
-    String subtype = 'normal';
+    String? subtype = null;
     final ok = await showDialog<bool>(
       context: context,
       builder: (ctx) => StatefulBuilder(
@@ -299,15 +299,18 @@ class _ManageLedgersPageState extends State<ManageLedgersPage> {
                 ],
                 onChanged: (v) => setSt(() {
                   type = v!;
-                  subtype = _defaultSubtype(type);
+                  subtype = null;
                 }),
               ),
               const SizedBox(height: 12),
               DropdownButtonFormField<String>(
                 value: subtype,
-                decoration: const InputDecoration(labelText: 'Subtype'),
+                decoration: const InputDecoration(
+                  labelText: 'Subtype (Required)',
+                  hintText: 'Please select a subtype',
+                ),
                 items: _subtypeItems(type),
-                onChanged: (v) => setSt(() => subtype = v!),
+                onChanged: (v) => setSt(() => subtype = v),
               ),
               const SizedBox(height: 8),
               Padding(
@@ -331,6 +334,12 @@ class _ManageLedgersPageState extends State<ManageLedgersPage> {
     if (ok != true) return;
     final name = nameCtrl.text.trim();
     if (name.isEmpty) return;
+    if (subtype == null) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+          content: Text('Please select a Subtype to continue.')));
+      return;
+    }
     final existing = await _db.getAccountByName(name);
     if (existing != null) {
       if (!mounted) return;
@@ -351,7 +360,7 @@ class _ManageLedgersPageState extends State<ManageLedgersPage> {
 
   String _defaultSubtype(String type) {
     if (type == 'asset') return 'bank';
-    if (type == 'liability') return 'payable';
+    if (type == 'liability') return 'loan_long';
     return 'normal';
   }
 
@@ -378,7 +387,8 @@ class _ManageLedgersPageState extends State<ManageLedgersPage> {
     return const [DropdownMenuItem(value: 'normal', child: Text('Normal'))];
   }
 
-  String _subtypeHint(String type, String subtype) {
+  String _subtypeHint(String type, String? subtype) {
+    if (subtype == null) return 'Please select a subtype above.';
     if (type == 'asset' && subtype == 'bank') {
       return 'Shows up in Payment Accounts for sales and purchases.';
     }

@@ -388,6 +388,63 @@ class DatabaseHelper {
         [delta, id]);
   }
 
+
+  // ---------- Safe Delete ----------
+  Future<void> deleteJournalEntryWithReverse(String entryId) async {
+    final db = await database;
+    await db.transaction((txn) async {
+      final entries = await txn.query('journal_entries', where: 'id = ?', whereArgs: [entryId]);
+      if (entries.isEmpty) return;
+      final entry = entries.first;
+      final source = entry['source'];
+      final sourceId = entry['source_id'];
+
+      // 1. Reverse Customer Balances for Sales
+      if (source == 'sale' && sourceId != null) {
+        final invs = await txn.query('invoices', where: 'id = ?', whereArgs: [sourceId]);
+        if (invs.isNotEmpty) {
+          final inv = invs.first;
+          final custId = inv['customer_id'];
+          final due = (inv['balance_due'] as num?)?.toDouble() ?? 0;
+          if (custId != null && due != 0) {
+            await txn.rawUpdate('UPDATE customers SET current_balance = current_balance - ? WHERE id = ?', [due, custId]);
+          }
+          await txn.delete('invoices', where: 'id = ?', whereArgs: [sourceId]);
+          await txn.delete('sale_items', where: 'invoice_id = ?', whereArgs: [sourceId]);
+        }
+      }
+
+      // 2. Reverse Supplier Balances for Purchases
+      if (source == 'purchase') {
+        final pis = await txn.query('purchase_items', where: 'entry_id = ?', whereArgs: [entryId]);
+        if (pis.isNotEmpty) {
+          final pi = pis.first;
+          final vendorId = pi['vendor'];
+          final total = (pi['total'] as num?)?.toDouble() ?? 0;
+          
+          // Calculate how much was paid via cash/bank
+          double paid = 0;
+          final lines = await txn.rawQuery('''
+            SELECT SUM(jl.debit) AS d FROM journal_lines jl
+            JOIN accounts a ON a.id = jl.account_id
+            WHERE jl.entry_id = ? AND a.subtype IN ('cash', 'bank', 'wallet')
+          ''', [entryId]);
+          if (lines.isNotEmpty && lines.first['d'] != null) {
+            paid = (lines.first['d'] as num).toDouble();
+          }
+          
+          final unpaid = total - paid;
+          if (vendorId != null && unpaid > 0) {
+            await txn.rawUpdate('UPDATE suppliers SET current_balance = current_balance - ? WHERE id = ?', [unpaid, vendorId]);
+          }
+          await txn.delete('purchase_items', where: 'entry_id = ?', whereArgs: [entryId]);
+        }
+      }
+
+      // 3. Delete the journal entry (cascades to lines)
+      await txn.delete('journal_entries', where: 'id = ?', whereArgs: [entryId]);
+    });
+  }
   // ---------- Balances & Totals ----------
   Future<double> getAccountBalance(String accountId) async {
     final db = await database;

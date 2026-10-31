@@ -82,13 +82,17 @@ class _SpendFormPageState extends State<SpendFormPage> {
         .where((a) =>
             a['type'] == 'liability' &&
             a['active'] == 1 &&
-            a['subtype'] == 'loan_short')
+            (a['subtype'] == 'loan_short' || 
+             a['subtype'] == 'short_term_liability' ||
+             a['subtype'] == 'normal' || 
+             a['subtype'] == null))
         .toList();
     final loansLong = all
         .where((a) =>
             a['type'] == 'liability' &&
             a['active'] == 1 &&
-            a['subtype'] == 'loan_long')
+            (a['subtype'] == 'loan_long' || 
+             a['subtype'] == 'long_term_liability'))
         .toList();
     final equity = all
         .where((a) =>
@@ -457,23 +461,35 @@ class _SpendFormPageState extends State<SpendFormPage> {
                   style: const TextStyle(fontSize: 12, color: Colors.red),
                 ),
               )
-            else
-              DropdownButtonFormField<String>(
-                value: _paymentAccId.isEmpty
-                    ? sourceList.first['id'] as String
-                    : _paymentAccId,
-                decoration: const InputDecoration(
-                    labelText: 'Specific account',
-                    border: OutlineInputBorder(), isDense: true),
-                items: sourceList
-                    .map((a) => DropdownMenuItem(
-                          value: a['id'] as String,
-                          child: Text(a['name'] as String),
-                        ))
-                    .toList(),
-                onChanged: (v) =>
-                    setState(() => _paymentAccId = v ?? ''),
+            else ...[
+              const SizedBox(height: 8),
+              const Text('Select the specific account:',
+                  style: TextStyle(fontSize: 12, color: Colors.black54)),
+              const SizedBox(height: 4),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 12),
+                decoration: BoxDecoration(
+                  border: Border.all(color: Colors.grey.shade400),
+                  borderRadius: BorderRadius.circular(4),
+                ),
+                child: DropdownButton<String>(
+                  value: _paymentAccId.isEmpty
+                      ? sourceList.first['id'] as String
+                      : _paymentAccId,
+                  isExpanded: true,
+                  underline: const SizedBox(),
+                  menuMaxHeight: 250,
+                  items: sourceList
+                      .map((a) => DropdownMenuItem(
+                            value: a['id'] as String,
+                            child: Text(a['name'] as String),
+                          ))
+                      .toList(),
+                  onChanged: (v) =>
+                      setState(() => _paymentAccId = v ?? ''),
+                ),
               ),
+            ],
 
             const SizedBox(height: 24),
             SizedBox(

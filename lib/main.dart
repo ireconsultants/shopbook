@@ -1807,7 +1807,7 @@ class ExpenseScreen extends StatelessWidget {
   const ExpenseScreen({super.key, required this.onChanged});
   @override
   Widget build(BuildContext context) {
-    return SpendFormPage(onChanged: onChanged);
+    return SpendFormPage(key: key, onChanged: onChanged);
   }
 }
 
