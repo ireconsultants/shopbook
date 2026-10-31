@@ -209,16 +209,20 @@ class _SetupScreenState extends State<SetupScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Text('Barber Shop Book', style: TextStyle(fontSize: 18)),
-            Text('Powered by Indre Consultants',
-                style:
-                    TextStyle(fontSize: 10, fontWeight: FontWeight.normal)),
-          ],
-        ),
+        title: const Text('Barber Shop Book', style: TextStyle(fontSize: 18)),
+        actions: [
+          Center(
+            child: Text(
+              'Powered by IRE Consultants',
+              style: TextStyle(fontSize: 11, color: Colors.black54),
+            ),
+          ),
+          const SizedBox(width: 8),
+          Padding(
+            padding: const EdgeInsets.only(right: 16),
+            child: Image.asset('assets/logo.png', height: 48),
+          ),
+        ],
       ),
       body: Padding(
         padding: const EdgeInsets.all(16),
@@ -344,17 +348,19 @@ class _MainShellState extends State<MainShell> {
 
     return Scaffold(
       appBar: AppBar(
-        title: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Text(_shopName, style: const TextStyle(fontSize: 18)),
-            const Text('Powered by Indre Consultants',
-                style:
-                    TextStyle(fontSize: 10, fontWeight: FontWeight.normal)),
-          ],
-        ),
+        title: Text(_shopName, style: const TextStyle(fontSize: 18)),
         actions: [
+          Center(
+            child: Text(
+              'Powered by IRE Consultants',
+              style: TextStyle(fontSize: 11, color: Colors.black54),
+            ),
+          ),
+          const SizedBox(width: 8),
+          Padding(
+            padding: const EdgeInsets.only(right: 8),
+            child: Image.asset('assets/logo.png', height: 48),
+          ),
           Padding(
             padding: const EdgeInsets.only(right: 4),
             child: Center(
@@ -434,6 +440,10 @@ class _SaleScreenState extends State<SaleScreen> {
   String? _paymentAccountId;
   final _paidCtrl = TextEditingController();
   bool _paymentSplit = false;
+  final _discountCtrl = TextEditingController();
+  bool _vatEnabled = false;
+  double _vatRate = 0;
+  String _vatBasis = 'gross';
 
   @override
   void initState() {
@@ -445,6 +455,13 @@ class _SaleScreenState extends State<SaleScreen> {
     final items = await _db.getActiveItems();
     final custs = await _db.getActiveCustomers();
     final emps = await _db.getActiveEmployees();
+    final advStr = await _db.getSetting('advanced_mode');
+    final vatEnStr = await _db.getSetting('vat_enabled');
+    final vatRateStr = await _db.getSetting('vat_rate') ?? '0';
+    final vatBasisStr = await _db.getSetting('vat_basis') ?? 'gross';
+    final adv = advStr == '1';
+    final vatOn = adv && vatEnStr == '1';
+    final vatRate = double.tryParse(vatRateStr) ?? 0;
     final all = await _db.getAllAccounts();
     final payAccs = all
         .where((a) =>
@@ -464,11 +481,25 @@ class _SaleScreenState extends State<SaleScreen> {
           emps.isNotEmpty ? emps.first['id'] as String : null;
       _paymentAccountId =
           payAccs.isNotEmpty ? payAccs.first['id'] as String : null;
+      _vatEnabled = vatOn;
+      _vatRate = vatRate;
+      _vatBasis = vatBasisStr;
       _loading = false;
     });
   }
 
-  double get _total => _bill.fold(0.0, (s, l) => s + l.total);
+  double get _subtotal => _bill.fold(0.0, (s, l) => s + l.total);
+  double get _discount => double.tryParse(_discountCtrl.text) ?? 0;
+  double get _vat {
+    if (!_vatEnabled || _vatRate <= 0) return 0;
+    double base = _subtotal;
+    if (_vatBasis == 'net') {
+      base = _subtotal - _discount;
+      if (base < 0) base = 0;
+    }
+    return double.parse((base * _vatRate / 100).toStringAsFixed(2));
+  }
+  double get _total => _subtotal - _discount + _vat;
   double get _paid {
     if (!_paymentSplit) return _total;
     return double.tryParse(_paidCtrl.text) ?? 0;
@@ -509,6 +540,7 @@ class _SaleScreenState extends State<SaleScreen> {
     setState(() {
       _bill.clear();
       _paidCtrl.clear();
+      _discountCtrl.clear();
       _paymentSplit = false;
     });
   }
@@ -607,6 +639,9 @@ class _SaleScreenState extends State<SaleScreen> {
     if (_paymentAccountId == null) return;
 
     final cash = _total;
+    final subtotal = _subtotal;
+    final discount = _discount;
+    final vat = _vat;
     final paid = _paid;
     final unpaid = _unpaid;
     final advance = _advance;
@@ -615,6 +650,21 @@ class _SaleScreenState extends State<SaleScreen> {
     final incomeAcc = await _db.getAccountByName('Service Income');
     final recAcc = await _db.getAccountByName('Accounts Receivable');
     if (paymentAcc == null || incomeAcc == null || recAcc == null) return;
+
+    Future<String> ensure(String name, String type) async {
+      final a = await _db.getAccountByName(name);
+      if (a != null) return a['id'] as String;
+      final id = _uuid.v4();
+      await _db.insertAccount({
+        'id': id, 'name': name, 'type': type,
+        'is_system': 1, 'active': 1,
+      });
+      return id;
+    }
+    final discountAccId =
+        discount > 0 ? await ensure('Discount Allowed', 'expense') : null;
+    final vatAccId =
+        vat > 0 ? await ensure('VAT Payable', 'liability') : null;
 
     final lines = <Map<String, dynamic>>[];
 
@@ -636,11 +686,29 @@ class _SaleScreenState extends State<SaleScreen> {
       });
     }
 
+    if (discountAccId != null) {
+      lines.add({
+        'id': _uuid.v4(),
+        'account_id': discountAccId,
+        'debit': discount,
+        'credit': 0,
+      });
+    }
+
+    if (vatAccId != null) {
+      lines.add({
+        'id': _uuid.v4(),
+        'account_id': vatAccId,
+        'debit': 0,
+        'credit': vat,
+      });
+    }
+
     lines.add({
       'id': _uuid.v4(),
       'account_id': incomeAcc['id'],
       'debit': 0,
-      'credit': cash,
+      'credit': subtotal,
     });
 
     if (advance > 0) {
@@ -680,6 +748,9 @@ class _SaleScreenState extends State<SaleScreen> {
       'date': combined.toIso8601String(),
       'customer_id': _customer?['id'],
       'customer_name': _customer?['name'] ?? 'Walk-in',
+      'subtotal': subtotal,
+      'discount': discount,
+      'vat': vat,
       'total': cash,
       'paid_amount': paid,
       'balance_due': unpaid - advance,
@@ -762,7 +833,7 @@ class _SaleScreenState extends State<SaleScreen> {
     if (due > 0) b.writeln('*Due: ${money(due)}*');
     b.writeln('');
     b.writeln('Thank you for your business!');
-    b.writeln('_Powered by Indre Consultants_');
+    b.writeln('_Powered by IRE Consultants_');
     return b.toString();
   }
 
@@ -776,6 +847,7 @@ class _SaleScreenState extends State<SaleScreen> {
   @override
   void dispose() {
     _paidCtrl.dispose();
+    _discountCtrl.dispose();
     super.dispose();
   }
 
@@ -846,56 +918,74 @@ class _SaleScreenState extends State<SaleScreen> {
               ),
             ],
           ),
-          const SizedBox(height: 6),
+          const SizedBox(height: 8),
           Row(
             children: [
-              const Icon(Icons.content_cut, size: 16, color: Colors.teal),
-              const SizedBox(width: 6),
-              const Text('Barber:',
-                  style: TextStyle(
-                      fontSize: 13, fontWeight: FontWeight.w500)),
-              const SizedBox(width: 6),
               Expanded(
-                child: DropdownButton<String>(
-                  value: _currentBarberId,
-                  isDense: true,
-                  isExpanded: true,
-                  underline: const SizedBox(),
-                  items: _employees
-                      .map((e) => DropdownMenuItem(
-                            value: e['id'] as String,
-                            child: Text(e['name'] as String,
-                                style: const TextStyle(fontSize: 13)),
-                          ))
-                      .toList(),
-                  onChanged: (v) => setState(() => _currentBarberId = v),
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 8),
+                  decoration: BoxDecoration(
+                    border: Border.all(color: Colors.grey.shade300),
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Padding(
+                        padding: EdgeInsets.only(top: 4),
+                        child: Text('Service by',
+                            style: TextStyle(fontSize: 10, color: Colors.black54)),
+                      ),
+                      DropdownButton<String>(
+                        value: _currentBarberId,
+                        isDense: true,
+                        isExpanded: true,
+                        underline: const SizedBox(),
+                        items: _employees
+                            .map((e) => DropdownMenuItem(
+                                  value: e['id'] as String,
+                                  child: Text(e['name'] as String,
+                                      style: const TextStyle(fontSize: 14)),
+                                ))
+                            .toList(),
+                        onChanged: (v) => setState(() => _currentBarberId = v),
+                      ),
+                    ],
+                  ),
                 ),
               ),
-            ],
-          ),
-          const SizedBox(height: 6),
-          Row(
-            children: [
-              const Icon(Icons.payments, size: 16, color: Colors.teal),
-              const SizedBox(width: 6),
-              const Text('Received by:',
-                  style: TextStyle(
-                      fontSize: 13, fontWeight: FontWeight.w500)),
-              const SizedBox(width: 6),
+              const SizedBox(width: 8),
               Expanded(
-                child: DropdownButton<String>(
-                  value: _receivedById,
-                  isDense: true,
-                  isExpanded: true,
-                  underline: const SizedBox(),
-                  items: _employees
-                      .map((e) => DropdownMenuItem(
-                            value: e['id'] as String,
-                            child: Text(e['name'] as String,
-                                style: const TextStyle(fontSize: 13)),
-                          ))
-                      .toList(),
-                  onChanged: (v) => setState(() => _receivedById = v),
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 8),
+                  decoration: BoxDecoration(
+                    border: Border.all(color: Colors.grey.shade300),
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Padding(
+                        padding: EdgeInsets.only(top: 4),
+                        child: Text('Cash received by',
+                            style: TextStyle(fontSize: 10, color: Colors.black54)),
+                      ),
+                      DropdownButton<String>(
+                        value: _receivedById,
+                        isDense: true,
+                        isExpanded: true,
+                        underline: const SizedBox(),
+                        items: _employees
+                            .map((e) => DropdownMenuItem(
+                                  value: e['id'] as String,
+                                  child: Text(e['name'] as String,
+                                      style: const TextStyle(fontSize: 14)),
+                                ))
+                            .toList(),
+                        onChanged: (v) => setState(() => _receivedById = v),
+                      ),
+                    ],
+                  ),
                 ),
               ),
             ],
@@ -1073,6 +1163,23 @@ class _SaleScreenState extends State<SaleScreen> {
               ],
             ),
           ],
+          const SizedBox(height: 8),
+          Row(
+            children: [
+              Expanded(
+                child: TextField(
+                  controller: _discountCtrl,
+                  decoration: const InputDecoration(
+                      isDense: true,
+                      labelText: 'Discount',
+                      prefixText: 'Rs '),
+                  keyboardType:
+                      const TextInputType.numberWithOptions(decimal: true),
+                  onChanged: (_) => setState(() {}),
+                ),
+              ),
+            ],
+          ),
           const SizedBox(height: 8),
           Row(
             children: [
@@ -2342,6 +2449,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
   List<Map<String, dynamic>> _payAccounts = [];
   bool _loading = true;
   bool _advancedMode = false;
+  bool _vatEnabled = false;
+  final _vatRateCtrl = TextEditingController();
+  String _vatBasis = 'gross';
 
   @override
   void initState() {
@@ -2352,6 +2462,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
   Future<void> _load() async {
     final name = await _db.getSetting('shop_name') ?? '';
     final advStr = await _db.getSetting('advanced_mode');
+    final vatEnStr = await _db.getSetting('vat_enabled');
+    final vatRateStr = await _db.getSetting('vat_rate') ?? '0';
+    final vatBasisStr = await _db.getSetting('vat_basis') ?? 'gross';
     final adv = advStr == '1';
     final emps = await _db.getActiveEmployees();
     final all = await _db.getAllAccounts();
@@ -2367,8 +2480,21 @@ class _SettingsScreenState extends State<SettingsScreen> {
       _employees = emps;
       _payAccounts = pay;
       _advancedMode = adv;
+      _vatEnabled = vatEnStr == '1';
+      _vatRateCtrl.text = vatRateStr;
+      _vatBasis = vatBasisStr;
       _loading = false;
     });
+  }
+
+  Future<void> _saveVatSettings() async {
+    await _db.setSetting('vat_enabled', _vatEnabled ? '1' : '0');
+    await _db.setSetting('vat_rate', _vatRateCtrl.text);
+    await _db.setSetting('vat_basis', _vatBasis);
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+        content: Text('VAT settings saved'),
+        duration: Duration(seconds: 1)));
   }
 
   Future<void> _toggleAdvancedMode(bool v) async {
@@ -2552,7 +2678,22 @@ class _SettingsScreenState extends State<SettingsScreen> {
           body: Center(child: CircularProgressIndicator()));
     }
     return Scaffold(
-      appBar: AppBar(title: const Text('Settings')),
+      appBar: AppBar(
+        title: const Text('Settings'),
+        actions: [
+          Center(
+            child: Text(
+              'Powered by IRE Consultants',
+              style: TextStyle(fontSize: 11, color: Colors.black54),
+            ),
+          ),
+          const SizedBox(width: 8),
+          Padding(
+            padding: const EdgeInsets.only(right: 16),
+            child: Image.asset('assets/logo.png', height: 48),
+          ),
+        ],
+      ),
       body: ListView(
         padding: const EdgeInsets.all(16),
         children: [
@@ -2629,6 +2770,72 @@ class _SettingsScreenState extends State<SettingsScreen> {
             value: _advancedMode,
             onChanged: _toggleAdvancedMode,
           ),
+          if (_advancedMode) ...[
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: Colors.teal.shade50,
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text('VAT Settings',
+                      style: TextStyle(
+                          fontWeight: FontWeight.bold, fontSize: 14)),
+                  const SizedBox(height: 4),
+                  const Text(
+                      'Applied automatically to every sale when enabled',
+                      style: TextStyle(
+                          fontSize: 11, color: Colors.black54)),
+                  const SizedBox(height: 6),
+                  SwitchListTile(
+                    contentPadding: EdgeInsets.zero,
+                    title: const Text('Enable VAT'),
+                    value: _vatEnabled,
+                    onChanged: (v) {
+                      setState(() => _vatEnabled = v);
+                      _saveVatSettings();
+                    },
+                  ),
+                  if (_vatEnabled) ...[
+                    TextField(
+                      controller: _vatRateCtrl,
+                      decoration: const InputDecoration(
+                          labelText: 'VAT rate',
+                          suffixText: '%',
+                          isDense: true,
+                          border: OutlineInputBorder()),
+                      keyboardType:
+                          const TextInputType.numberWithOptions(decimal: true),
+                      onChanged: (_) => _saveVatSettings(),
+                    ),
+                    const SizedBox(height: 10),
+                    const Text('Compute VAT on:',
+                        style: TextStyle(fontSize: 12)),
+                    DropdownButtonFormField<String>(
+                      value: _vatBasis,
+                      decoration: const InputDecoration(
+                          border: OutlineInputBorder(), isDense: true),
+                      items: const [
+                        DropdownMenuItem(
+                            value: 'gross',
+                            child: Text('Gross sale (before discount)')),
+                        DropdownMenuItem(
+                            value: 'net',
+                            child: Text('Net sale (after discount)')),
+                      ],
+                      onChanged: (v) {
+                        setState(() => _vatBasis = v ?? 'gross');
+                        _saveVatSettings();
+                      },
+                    ),
+                  ],
+                ],
+              ),
+            ),
+            const SizedBox(height: 12),
+          ],
           const Divider(),
           const SizedBox(height: 8),
           Row(
@@ -2725,13 +2932,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                         onPressed: () => _deletePaymentAccount(a),
                       ),
               )),
-          const SizedBox(height: 32),
-          Center(
-            child: Text('Powered by Indre Consultants',
-                style:
-                    TextStyle(fontSize: 12, color: Colors.grey.shade600)),
-          ),
-        ],
+    ],
       ),
     );
   }

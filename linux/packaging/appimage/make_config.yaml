@@ -1,0 +1,13 @@
+display_name: ShopBook
+generic_name: ShopBook
+icon: assets/logo.png
+categories:
+  - Office
+  - Finance
+keywords:
+  - barber
+  - salon
+  - pos
+  - ledger
+  - shopbook
+startup_notify: true

@@ -24,7 +24,7 @@ class DatabaseHelper {
     final dir = await getApplicationDocumentsDirectory();
     final path = join(dir.path, 'shopbook.db');
     return await openDatabase(path,
-        version: 4,
+        version: 5,
         onConfigure: (db) async => await db.execute('PRAGMA foreign_keys = ON'),
         onCreate: _onCreate,
         onUpgrade: _onUpgrade);
@@ -57,6 +57,7 @@ class DatabaseHelper {
     await db.execute('''CREATE TABLE invoices(
       id TEXT PRIMARY KEY, invoice_no TEXT NOT NULL, date TEXT NOT NULL,
       customer_id TEXT, customer_name TEXT,
+      subtotal REAL DEFAULT 0, discount REAL DEFAULT 0, vat REAL DEFAULT 0,
       total REAL NOT NULL, paid_amount REAL NOT NULL DEFAULT 0,
       balance_due REAL NOT NULL DEFAULT 0,
       payment_mode TEXT, received_by_id TEXT, received_by_name TEXT,
@@ -80,6 +81,12 @@ class DatabaseHelper {
           "CREATE TABLE IF NOT EXISTS suppliers("
           "id TEXT PRIMARY KEY, name TEXT NOT NULL, phone TEXT, "
           "current_balance REAL DEFAULT 0, active INTEGER DEFAULT 1)");
+    }
+    if (oldV < 5) {
+      await db.execute("ALTER TABLE invoices ADD COLUMN subtotal REAL DEFAULT 0");
+      await db.execute("ALTER TABLE invoices ADD COLUMN discount REAL DEFAULT 0");
+      await db.execute("ALTER TABLE invoices ADD COLUMN vat REAL DEFAULT 0");
+      await db.execute("UPDATE invoices SET subtotal = total WHERE subtotal = 0");
     }
     if (oldV < 4) {
       await db.execute(
